@@ -548,7 +548,7 @@ def main():
         main_impl()
     except TapSalesforceQuotaExceededError as e:
         LOGGER.critical(e)
-        sys.exit(2)
+        sys.exit(0)
     except TapSalesforceExceptionError as e:
         LOGGER.critical(e)
         sys.exit(1)
