@@ -10,10 +10,6 @@ from copy import deepcopy
 import singer
 import singer.utils as singer_utils
 from singer import metadata, metrics
-import sys
-import inspect
-from tap_salesforce.sync import state as tap_state
-import singer
 
 import tap_salesforce.salesforce
 from tap_salesforce.salesforce import Salesforce
@@ -552,22 +548,6 @@ def main():
         main_impl()
     except TapSalesforceQuotaExceededError as e:
         LOGGER.critical(e)
-
-        # Check if we are in discovery mode by inspecting the call stack
-        frame = inspect.currentframe()
-        while frame:
-            if frame.f_code.co_name == 'main_impl':
-                args = frame.f_locals.get('args', None)
-                break
-            frame = frame.f_back
-        if args and getattr(args, 'discover', False):
-            # If in discovery, exit silently (success)
-            sys.exit(0)
-        # Otherwise, try to write state and exit gracefully
-        try:
-            singer.write_state(tap_state)
-        except Exception:
-            pass
         sys.exit(0)
     except TapSalesforceExceptionError as e:
         LOGGER.critical(e)
