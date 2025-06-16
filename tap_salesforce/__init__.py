@@ -10,6 +10,8 @@ from copy import deepcopy
 import singer
 import singer.utils as singer_utils
 from singer import metadata, metrics
+import sys
+import json
 
 import tap_salesforce.salesforce
 from tap_salesforce.salesforce import Salesforce
@@ -546,8 +548,14 @@ def main_impl():
 def main():
     try:
         main_impl()
+
     except TapSalesforceQuotaExceededError as e:
-        LOGGER.critical(e)
+        LOGGER.critical(f"SALESFORCE QUOTA EXCEEDED: {e}")
+        LOGGER.info(f"SALESFORCE QUOTA EXCEEDED: {e}")
+        if "--discover" in sys.argv:
+            # Output an empty Singer catalog so Meltano doesn't fail
+            json.dump({"streams": []}, sys.stdout)
+            sys.stdout.flush()
         sys.exit(0)
     except TapSalesforceExceptionError as e:
         LOGGER.critical(e)
