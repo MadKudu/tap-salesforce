@@ -525,7 +525,11 @@ def main_impl():
 
         if args.discover:
             do_discover(sf, CONFIG.get("streams_to_discover", []))
+            # Dynamically increase quota limit for sync after successful discovery
+            CONFIG["quota_percent_total"] = 95
         elif args.properties or args.catalog:
+            # Ensure quota is set to 95% for sync
+            CONFIG["quota_percent_total"] = 95
             catalog = args.properties or args.catalog.to_dict()
             state = build_state(args.state, catalog)
             do_sync(sf, catalog, state)
@@ -553,10 +557,12 @@ def main():
         LOGGER.critical(f"SALESFORCE QUOTA EXCEEDED: {e}")
         LOGGER.info(f"SALESFORCE QUOTA EXCEEDED: {e}")
         if "--discover" in sys.argv:
-            # Output an empty Singer catalog so Meltano doesn't fail
-            json.dump({"streams": []}, sys.stdout)
+            with open(".last_catalog.json") as f:
+                last_catalog = json.load(f)
+            json.dump(last_catalog, sys.stdout)
             sys.stdout.flush()
-        sys.exit(0)
+            sys.exit(0)
+        sys.exit(2)
     except TapSalesforceExceptionError as e:
         LOGGER.critical(e)
         sys.exit(1)
