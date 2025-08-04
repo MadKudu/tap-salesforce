@@ -227,6 +227,7 @@ class Salesforce:
         select_fields_by_default=None,
         default_start_date=None,
         api_type=None,
+        limit_tasks_month=None,
     ):
         self.api_type = api_type.upper() if api_type else None
         self.session = requests.Session()
@@ -245,6 +246,7 @@ class Salesforce:
         self.jobs_completed = 0
         self.data_url = "{}/services/data/v60.0/{}"
         self.pk_chunking = False
+        self.limit_tasks_month = limit_tasks_month
 
         self.auth = SalesforceAuth.from_credentials(credentials, is_sandbox=self.is_sandbox)
 
@@ -385,10 +387,37 @@ class Salesforce:
         ]
 
     def get_start_date(self, state, catalog_entry):
+        """Get the start date for a stream, applying task month limit if configured."""
         catalog_metadata = metadata.to_map(catalog_entry["metadata"])
         replication_key = catalog_metadata.get((), {}).get("replication-key")
 
-        return singer.get_bookmark(state, catalog_entry["tap_stream_id"], replication_key) or self.default_start_date
+        # Get the bookmark date or default start date
+        start_date = (
+            singer.get_bookmark(state, catalog_entry["tap_stream_id"], replication_key) or self.default_start_date
+        )
+
+        # Apply task month limit if this is a Task stream and limit is configured
+        if (
+            catalog_entry["tap_stream_id"] == "Task"
+            and self.limit_tasks_month is not None
+            and self.limit_tasks_month > 0
+        ):
+            # Calculate the earliest allowed date (limit_tasks_month ago from now)
+            now = singer_utils.now()
+            month_limit_date = now - timedelta(days=31 * self.limit_tasks_month)
+            month_limit_date_str = month_limit_date.isoformat()
+
+            # Use the later of the two dates (bookmark/default vs month limit)
+            if start_date < month_limit_date_str:
+                LOGGER.info(
+                    "Task stream limited to %d months. Using start date %s instead of %s",
+                    self.limit_tasks_month,
+                    month_limit_date_str,
+                    start_date,
+                )
+                return month_limit_date_str
+
+        return start_date
 
     def _build_query_string(self, catalog_entry, start_date, end_date=None, order_by_clause=True):
         selected_properties = self._get_selected_properties(catalog_entry)

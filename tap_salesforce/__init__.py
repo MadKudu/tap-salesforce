@@ -518,6 +518,7 @@ def main_impl():
             select_fields_by_default=CONFIG.get("select_fields_by_default"),
             default_start_date=CONFIG.get("start_date"),
             api_type=CONFIG.get("api_type"),
+            limit_tasks_month=CONFIG.get("limit_tasks_month"),
         )
         sf.login()
 
