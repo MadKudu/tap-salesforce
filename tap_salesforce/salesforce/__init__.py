@@ -376,7 +376,7 @@ class Salesforce:
         mdata = metadata.to_map(catalog_entry["metadata"])
         properties = catalog_entry["schema"].get("properties", {})
 
-        return [
+        selected_fields = [
             k
             for k in properties
             if singer.should_sync_field(
@@ -385,6 +385,25 @@ class Salesforce:
                 self.select_fields_by_default,
             )
         ]
+        # Limit fields to prevent "Request Header Fields Too Large" error
+        # Prioritize essential fields first
+        essential_fields = ["Id", "SystemModstamp", "CreatedDate", "LastModifiedDate"]
+        priority_fields = [f for f in essential_fields if f in selected_fields]
+        mk_fields = [f for f in selected_fields if "mk_" in f]
+        other_fields = [f for f in selected_fields if f not in essential_fields]
+
+        # Limit to 300 fields total to prevent header size issues
+        max_fields = 300
+        if len(selected_fields) > max_fields:
+            LOGGER.warning(
+                f"Limiting {catalog_entry['stream']} fields from {len(selected_fields)} to {max_fields} "
+                "to prevent header size issues"
+            )
+            # Include all priority fields first, then limit other fields
+            remaining_slots = max_fields - len(priority_fields) - len(mk_fields)
+            limited_fields = priority_fields + mk_fields + other_fields[:remaining_slots]
+            return limited_fields
+        return selected_fields
 
     def get_start_date(self, state, catalog_entry):
         """Get the start date for a stream, applying task month limit if configured."""
