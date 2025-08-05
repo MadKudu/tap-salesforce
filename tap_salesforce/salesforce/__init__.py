@@ -385,16 +385,18 @@ class Salesforce:
                 self.select_fields_by_default,
             )
         ]
-        # Limit fields to prevent "Request Header Fields Too Large" error
-        # Prioritize essential fields first
-        essential_fields = ["Id", "SystemModstamp", "CreatedDate", "LastModifiedDate"]
-        priority_fields = [f for f in essential_fields if f in selected_fields]
-        mk_fields = [f for f in selected_fields if "mk_" in f]
-        other_fields = [f for f in selected_fields if f not in essential_fields]
 
-        # Limit to 300 fields total to prevent header size issues
-        max_fields = 300
+        LOGGER.info(f"Selected {len(selected_fields)} fields for {catalog_entry['stream']}")
+
+        # Limit to 500 fields total to prevent header size issues
+        max_fields = 500
         if len(selected_fields) > max_fields:
+            # Limit fields to prevent "Request Header Fields Too Large" error
+            # Prioritize essential fields first
+            essential_fields = ["Id", "SystemModstamp", "CreatedDate", "LastModifiedDate"]
+            priority_fields = [f for f in essential_fields if f in selected_fields]
+            mk_fields = [f for f in selected_fields if "mk_" in f]
+            other_fields = [f for f in selected_fields if f not in essential_fields]
             LOGGER.warning(
                 f"Limiting {catalog_entry['stream']} fields from {len(selected_fields)} to {max_fields} "
                 "to prevent header size issues"
@@ -402,7 +404,7 @@ class Salesforce:
             # Include all priority fields first, then limit other fields
             remaining_slots = max_fields - len(priority_fields) - len(mk_fields)
             limited_fields = priority_fields + mk_fields + other_fields[:remaining_slots]
-            return limited_fields
+            return list(set(limited_fields))
         return selected_fields
 
     def get_start_date(self, state, catalog_entry):
