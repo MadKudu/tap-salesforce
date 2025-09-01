@@ -519,6 +519,7 @@ def main_impl():
             default_start_date=CONFIG.get("start_date"),
             api_type=CONFIG.get("api_type"),
             limit_tasks_month=CONFIG.get("limit_tasks_month"),
+            pull_config_objects=CONFIG.get("OBJECTS"),
         )
         sf.login()
 

@@ -228,6 +228,7 @@ class Salesforce:
         default_start_date=None,
         api_type=None,
         limit_tasks_month=None,
+        pull_config_objects=None,
     ):
         self.api_type = api_type.upper() if api_type else None
         self.session = requests.Session()
@@ -247,6 +248,7 @@ class Salesforce:
         self.data_url = "{}/services/data/v60.0/{}"
         self.pk_chunking = False
         self.limit_tasks_month = limit_tasks_month
+        self.pull_config_objects = pull_config_objects
 
         self.auth = SalesforceAuth.from_credentials(credentials, is_sandbox=self.is_sandbox)
 
@@ -263,6 +265,22 @@ class Salesforce:
                 self.default_start_date,
                 default_start_date,
             )
+
+    def _parse_objects_config(self, objects_config: str | list[dict], stream: str) -> list[str]:
+        """Parse the OBJECTS configuration string into a list of fields for the given stream."""
+        if not objects_config or not stream:
+            return []
+
+        try:
+            objects_list = json.loads(objects_config) if isinstance(objects_config, str) else objects_config
+
+            for obj in objects_list:
+                if isinstance(obj, dict) and obj.get('name', '').lower() == stream.lower():
+                    return obj.get('columns', [])
+            return []
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            LOGGER.warning(f"Failed to parse OBJECTS configuration: {e}")
+            return []
 
     # pylint: disable=anomalous-backslash-in-string,line-too-long
     def check_rest_quota_usage(self, headers):
@@ -375,8 +393,8 @@ class Salesforce:
     def _get_selected_properties(self, catalog_entry):
         mdata = metadata.to_map(catalog_entry["metadata"])
         properties = catalog_entry["schema"].get("properties", {})
-
-        selected_fields = [
+        stream = catalog_entry["stream"]
+        meltano_selected_fields = [
             k
             for k in properties
             if singer.should_sync_field(
@@ -386,26 +404,39 @@ class Salesforce:
             )
         ]
 
-        LOGGER.info(f"Selected {len(selected_fields)} fields for {catalog_entry['stream']}")
+        pull_config_fields = self._parse_objects_config(self.pull_config_objects, stream)
 
         # Limit to 500 fields total to prevent header size issues
         max_fields = 500
-        if len(selected_fields) > max_fields:
+        if len(pull_config_fields) > max_fields:
+            LOGGER.warning(
+                f"""Pull config contains more than {max_fields} fields for {stream}.
+                Only the first {max_fields} fields will be used."""
+            )
+
+        if len(meltano_selected_fields) > max_fields:
             # Limit fields to prevent "Request Header Fields Too Large" error
             # Prioritize essential fields first
             essential_fields = ["Id", "SystemModstamp", "CreatedDate", "LastModifiedDate"]
-            priority_fields = [f for f in essential_fields if f in selected_fields]
-            mk_fields = [f for f in selected_fields if "mk_" in f]
-            other_fields = [f for f in selected_fields if f not in essential_fields]
+            priority_fields = [f for f in essential_fields if f in meltano_selected_fields]
+            priority_fields.extend([f for f in pull_config_fields if f in meltano_selected_fields])
+            priority_fields = list(set(priority_fields))
+            mk_fields = [f for f in meltano_selected_fields if "mk_" in f and f not in priority_fields]
+            other_fields = [f for f in meltano_selected_fields if f not in priority_fields + mk_fields]
+
+            ingested_fields = priority_fields[:max_fields]
+            ingested_fields += mk_fields[:max_fields-len(ingested_fields)]
+            ingested_fields += other_fields[:max_fields-len(ingested_fields)]
+
+
             LOGGER.warning(
-                f"Limiting {catalog_entry['stream']} fields from {len(selected_fields)} to {max_fields} "
+                f"Limiting {stream} fields from {len(meltano_selected_fields)} to {max_fields} "
                 "to prevent header size issues"
             )
-            # Include all priority fields first, then limit other fields
-            remaining_slots = max_fields - len(priority_fields) - len(mk_fields)
-            limited_fields = priority_fields + mk_fields + other_fields[:remaining_slots]
-            return list(set(limited_fields))
-        return selected_fields
+
+            LOGGER.info(f"Selected {len(ingested_fields)} fields for {stream}: {ingested_fields}")
+            return ingested_fields
+        return meltano_selected_fields
 
     def get_start_date(self, state, catalog_entry):
         """Get the start date for a stream, applying task month limit if configured."""
